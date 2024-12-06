@@ -1,5 +1,7 @@
 use std::{
-    fs, io::{Error, ErrorKind, Result}, sync::Arc
+    fs,
+    io::{Error, ErrorKind, Result},
+    sync::Arc,
 };
 use avail_rust::{hex, H256, SDK};
 use tokio::{
@@ -101,5 +103,20 @@ async fn fetch_block_hash(_block_number: &str) -> std::result::Result<H256, Box<
     };
     let latest_hash = avail.rpc.chain.get_block_hash(block_number).await.unwrap();
     println!("block hash for block number {}: {:?}", block_number.unwrap_or(0), latest_hash);
+    let mut stream = TcpStream::connect("0.0.0.0:40002").await?;
+
+    let now = std::time::SystemTime::now();
+    let timestamp = format!("{:?}", now);
+    let data: Vec<Vec<u8>> = vec![
+        b"datablock".to_vec(),
+        format!("Hello world!! {}", timestamp).into_bytes(),
+        format!("{}", hex::encode(latest_hash.as_bytes())).into_bytes(),
+    ];
+
+    let flattened_data: Vec<u8> = data.concat();
+
+    stream.write_all(&flattened_data).await?;
+    // tokio::time::sleep(Duration::from_millis(5000)).await;
+    stream.flush().await?;
     Ok(latest_hash)
 }
