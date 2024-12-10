@@ -36,7 +36,7 @@ async fn rest_server() -> Result<()> {
     let mut router = Router::new();
 
     router.add_route("/add-block-by-number/".to_string(), |block_number: String| async move {
-        match fetch_block_hash(&block_number, None).await {
+        match fetch_block_hash("o3".to_string(), &block_number, None).await {
             Ok(block_hash) => {
                 format!(
                     "{{\"msg\": \"block hash added successfully\", \"block_hash\": \"0x{}\"}}",
@@ -73,7 +73,7 @@ async fn rest_server() -> Result<()> {
 async fn block_hash_loop() -> Result<()> {
     let mut last_block_hash: Option<H256> = None;
     loop {
-        match fetch_block_hash("", last_block_hash).await {
+        match fetch_block_hash("avail".to_string(), "", last_block_hash).await {
             Ok(new_block_hash) => {
                 last_block_hash = Some(new_block_hash);
             },
@@ -121,7 +121,7 @@ async fn handle_connection(mut stream: TcpStream, router: Arc<Router>) -> Result
     Ok(())
 }
 
-async fn fetch_block_hash(_block_number: &str, last_block_hash: Option<H256>) -> std::result::Result<H256, Box<dyn std::error::Error>> {
+async fn fetch_block_hash(identifier: String, _block_number: &str, last_block_hash: Option<H256>) -> std::result::Result<H256, Box<dyn std::error::Error>> {
     let avail = SDK::new("wss://mainnet.avail-rpc.com/").await?;
     let block_number = if !_block_number.is_empty() {
         match _block_number.trim().parse::<u32>() {
@@ -139,11 +139,9 @@ async fn fetch_block_hash(_block_number: &str, last_block_hash: Option<H256>) ->
 
         sender.connect("tcp://0.0.0.0:40006").expect("failed to connect to endpoint");
 
-        let now = std::time::SystemTime::now();
-        let timestamp = format!("{:?}", now);
         let data: Vec<Vec<u8>> = vec![
             b"datablock".to_vec(),
-            format!("Hello world!! {}", timestamp).into_bytes(),
+            format!("{}-chain", identifier).into_bytes(),
             format!("{}", hex::encode(latest_hash.as_bytes())).into_bytes(),
         ];
 
