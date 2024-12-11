@@ -140,8 +140,8 @@ async fn fetch_block_hash(identifier: String, _block_number: &str, last_block_ha
         sender.connect("tcp://0.0.0.0:40006").expect("failed to connect to endpoint");
 
         let data: Vec<Vec<u8>> = vec![
-            format!("{}-chain", identifier).into_bytes(),
-            format!("{}", hex::encode(latest_hash.as_bytes())).into_bytes(),
+            b"datablock".to_vec(),
+            format!("{}-chain-{}", identifier, hex::encode(latest_hash.as_bytes())).into_bytes(),
             b"!!!!!".to_vec(),
         ];
 
