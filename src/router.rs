@@ -17,18 +17,14 @@ impl Router {
     }
 
     pub fn add_route<F, Fut>(&mut self, pattern: String, handler: F)
-    where 
+    where
         F: Fn(String) -> Fut + 'static + Send + Sync,
         Fut: std::future::Future<Output = String> + Send + 'static,
     {
-        self.routes.push(
-            Route {
-                pattern,
-                handler: Arc::new(move |id| {
-                    tokio::spawn(handler(id.to_string()))
-                }),
-            }
-        );
+        self.routes.push(Route {
+            pattern,
+            handler: Arc::new(move |id| tokio::spawn(handler(id.to_string()))),
+        });
     }
 
     pub async fn handle(&self, path: &str) -> Option<String> {
