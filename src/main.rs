@@ -1,6 +1,6 @@
 use avail_rust::{hex, H256, SDK};
 use clap::Parser;
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::{
     fs,
     io::{Error, ErrorKind, Result},
@@ -37,21 +37,36 @@ async fn main() -> Result<()> {
                     "onlylayer",
                     "https://onlylayer.org",
                     "eth_getBlockByNumber",
+                    None,
+                    None,
                 ),
                 block_hash_from_rpc_loop(
                     "mintchain",
                     "https://global.rpc.mintchain.io",
                     "eth_getBlockByNumber",
+                    None,
+                    None,
                 ),
                 block_hash_from_rpc_loop(
                     "bitfinity",
                     "https://mainnet.bitfinity.network",
                     "eth_getBlockByNumber",
+                    None,
+                    None,
                 ),
                 block_hash_from_rpc_loop(
                     "u2u",
                     "https://rpc-mainnet.u2u.xyz",
                     "eth_getBlockByNumber",
+                    None,
+                    None,
+                ),
+                block_hash_from_rpc_loop(
+                    "celestia",
+                    "https://celestia-archival.rpc.grove.city/v1/097ddf85",
+                    "header.GetByHeight",
+                    None,
+                    Some(3078962),
                 ),
             ) {
                 eprintln!("Error in BOTH mode: {}", e);
@@ -132,10 +147,12 @@ async fn block_hash_from_rpc_loop(
     chain_name: &str,
     rpc_url: &str,
     method: &str,
+    auth: Option<&str>,
+    _last_block_number: Option<u128>,
 ) -> Result<()> {
     let zmq_socket_url =
         std::env::var("ZMQ_CHANNEL_URL").unwrap_or_else(|_| "tcp://0.0.0.0:40006".to_string());
-    let mut last_block_number: Option<u128> = None;
+    let mut last_block_number: Option<u128> = _last_block_number.clone();
     let context = Arc::new(zmq::Context::new());
     let sender = context
         .socket(zmq::REQ)
@@ -150,20 +167,44 @@ async fn block_hash_from_rpc_loop(
             None => "latest".to_string(),
             Some(n) => format!("0x{:x}", n + 1),
         };
-        match rpc_call(
-            rpc_url,
-            method,
+        let params = if chain_name == "celestia" {
+            vec![
+                json!(last_block_number),
+            ]
+        } else {
             vec![
                 Value::String(last_block_number_hex),
                 Value::Bool(false)
             ]
+        };
+        match rpc_call(
+            rpc_url,
+            method,
+            params.clone(),
+            auth,
         ).await {
             Ok(rpc_response) => {
+                last_block_number = last_block_number.map(|n| n + 1);
                 if let Some((latest_block_hash, latest_block_number)) = rpc_response
                     .get("result")
                     .and_then(|result| {
-                        let hash = result.get("hash").and_then(Value::as_str);
-                        let number = result.get("number").and_then(Value::as_str);
+                        let hash = if chain_name == "celestia" {
+                            result
+                                .get("commit")
+                                .and_then(|commit| commit.get("block_id"))
+                                .and_then(|block_id| block_id.get("hash"))
+                                .and_then(Value::as_str)
+                        } else {
+                            result.get("hash").and_then(Value::as_str)
+                        };
+                        let number = if chain_name == "celestia" {
+                            result
+                                .get("header")
+                                .and_then(|header| header.get("height"))
+                                .and_then(Value::as_str)
+                        } else {
+                            result.get("number").and_then(Value::as_str)
+                        };
                         Some((hash, number))
                     })
                 {

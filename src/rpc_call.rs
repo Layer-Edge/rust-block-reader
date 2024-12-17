@@ -7,6 +7,7 @@ pub mod rpc {
         rpc_url: &str,
         method: &str,
         params: Vec<Value>,
+        auth: Option<&str>,
     ) -> Result<Value, Box<dyn Error>> {
         let client = Client::new();
 
@@ -20,6 +21,7 @@ pub mod rpc {
         let response = client
             .post(rpc_url)
             .header("Content-Type", "application/json")
+            .header("Authorization", auth.unwrap_or_default())
             .json(&request_body)
             .send()
             .await?;
