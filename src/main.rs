@@ -30,8 +30,8 @@ async fn main() -> Result<()> {
         Mode::LOOP => block_hash_loop().await?,
         Mode::BOTH => {
             if let Err(e) = tokio::try_join!(
-                // rest_server(),
-                // block_hash_loop(),
+                rest_server(),
+                block_hash_loop(),
                 block_hash_from_rpc_loop(
                     "onlylayer",
                     "https://onlylayer.org",
@@ -143,7 +143,7 @@ async fn block_hash_from_rpc_loop(
                     // Compare with the last block hash
                     if last_block_hash.as_deref() != Some(latest_block_hash) {
                         last_block_hash = Some(latest_block_hash.to_string());
-                        println!("New block hash of {}: {}", chain_name, last_block_hash.clone().unwrap()[2..].to_string());
+                        println!("New block hash of {}: {}", chain_name, latest_block_hash);
 
                         let context = zmq::Context::new();
                         let sender = context
