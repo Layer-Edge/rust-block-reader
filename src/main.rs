@@ -154,12 +154,15 @@ async fn block_hash_from_rpc_loop(
                             .connect(&zmq_socket_url)
                             .expect("failed to connect to endpoint");
 
+                        let h256_hash = H256::from_slice(
+                            &hex::decode(last_block_hash.clone().unwrap().trim_start_matches("0x")).expect("Invalid hex string"),
+                        );
                         let data: Vec<Vec<u8>> = vec![
                             b"datablock".to_vec(),
                             format!(
                                 "{}-chain-{}",
                                 chain_name,
-                                hex::encode(last_block_hash.as_ref().unwrap()[2..].as_bytes())
+                                hex::encode(h256_hash.as_bytes())
                             )
                             .into_bytes(),
                             b"!!!!!".to_vec(),
