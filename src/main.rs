@@ -153,16 +153,16 @@ async fn block_hash_from_rpc_loop(
     let zmq_socket_url =
         std::env::var("ZMQ_CHANNEL_URL").unwrap_or_else(|_| "tcp://0.0.0.0:40006".to_string());
     let mut last_block_number: Option<u128> = _last_block_number.clone();
-    let context = Arc::new(zmq::Context::new());
-    let sender = context
-        .socket(zmq::REQ)
-        .expect("Failed to create REQ socket");
-
-    sender
-        .connect(&zmq_socket_url)
-        .expect("Failed to connect to endpoint");
 
     loop {
+        let context = Arc::new(zmq::Context::new());
+        let sender = context
+            .socket(zmq::REQ)
+            .expect("Failed to create REQ socket");
+    
+        sender
+            .connect(&zmq_socket_url)
+            .expect("Failed to connect to endpoint");
         let last_block_number_hex = match last_block_number {
             None => "latest".to_string(),
             Some(n) => format!("0x{:x}", n + 1),
@@ -240,10 +240,7 @@ async fn block_hash_from_rpc_loop(
                         if let Err(e) = sender.send_multipart(&data, 0) {
                             eprintln!("Failed to send data via ZMQ: {}", e);
                         } else {
-                            match sender.recv_string(0) {
-                                Ok(reply) => println!("Received reply: {:?}", reply),
-                                Err(e) => eprintln!("Failed to receive reply: {}", e),
-                            }
+                            drop(sender);
                             println!("Data sent successfully.");
                         }
                     } else {
@@ -340,10 +337,6 @@ async fn fetch_block_hash(
         if let Err(e) = sender.send_multipart(&data, 0) {
             eprintln!("Failed to send data via ZMQ: {}", e);
         } else {
-            match sender.recv_string(0) {
-                Ok(reply) => println!("Received reply: {:?}", reply),
-                Err(e) => eprintln!("Failed to receive reply: {}", e),
-            }
             drop(sender);
             println!("Data sent successfully.");
         }
