@@ -4,9 +4,9 @@ pub mod rpc {
     use serde_json::Value;
     use std::error::Error;
     pub async fn rpc_call(
-        rpc_url: &str, 
-        method: &str, 
-        params: Vec<Value>
+        rpc_url: &str,
+        method: &str,
+        params: Vec<Value>,
     ) -> Result<Value, Box<dyn Error>> {
         let client = Client::new();
 
