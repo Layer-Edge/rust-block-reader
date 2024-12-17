@@ -30,8 +30,8 @@ async fn main() -> Result<()> {
         Mode::LOOP => block_hash_loop().await?,
         Mode::BOTH => {
             if let Err(e) = tokio::try_join!(
-                // rest_server(),
-                // block_hash_loop(),
+                rest_server(),
+                block_hash_loop(),
                 block_hash_from_rpc_loop(
                     "onlylayer",
                     "https://onlylayer.org",
@@ -130,6 +130,7 @@ async fn block_hash_from_rpc_loop(
 ) -> Result<()> {
     let zmq_socket_url =
         std::env::var("ZMQ_CHANNEL_URL").unwrap_or_else(|_| "tcp://0.0.0.0:40006".to_string());
+    println!("zmq socket: {:?}", zmq_socket_url);
     let mut last_block_hash: Option<String> = None;
     loop {
         match rpc_call(rpc_url, method, params.clone()).await {
@@ -241,6 +242,7 @@ async fn fetch_block_hash(
 
         let zmq_socket_url =
             std::env::var("ZMQ_CHANNEL_URL").unwrap_or_else(|_| "tcp://0.0.0.0:40006".to_string());
+        println!("zmq socket: {:?}", zmq_socket_url);
         sender
             .connect(&zmq_socket_url)
             .expect("failed to connect to endpoint");
