@@ -59,6 +59,15 @@ async fn main() -> Result<()> {
                         serde_json::Value::Bool(false)
                     ]
                 ),
+                block_hash_from_rpc_loop(
+                    "u2u",
+                    "https://rpc-mainnet.u2u.xyz",
+                    "eth_getBlockByNumber",
+                    vec![
+                        serde_json::Value::String("latest".to_string()),
+                        serde_json::Value::Bool(false)
+                    ]
+                ),
             ) {
                 eprintln!("Error in BOTH mode: {}", e);
             }
