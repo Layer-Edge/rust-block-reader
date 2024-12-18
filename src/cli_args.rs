@@ -2,6 +2,8 @@ use clap::{Parser, ValueEnum};
 
 #[derive(Debug, Clone, ValueEnum)]
 pub enum Mode {
+    /// Run in Test Mode where it calls local function for testing
+    TEST,
     /// Run in Rest API Mode where it will receive block number and forward block hash to aggregator
     REST,
     /// Run in Loop Mode where it will fetch latest block hash and forward it to aggregator

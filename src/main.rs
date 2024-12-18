@@ -13,10 +13,12 @@ use tokio::{
     time::sleep,
 };
 
+mod block_number_op;
 mod cli_args;
 mod router;
 mod rpc_call;
 
+use block_number_op::{read_block_number, write_block_number};
 use cli_args::{Args, Mode};
 use router::Router;
 use rpc_call::rpc::rpc_call;
@@ -26,7 +28,18 @@ async fn main() -> Result<()> {
     dotenv::dotenv().ok();
     let args = Args::parse();
 
+    fs::create_dir_all("block_numbers")?;
+
     match args.mode {
+        Mode::TEST => {
+            let number = read_block_number("celestia");
+            let updated_number = if number.is_none() {
+                1
+            } else {
+                number.unwrap() + 1
+            };
+            write_block_number("celestia", updated_number)?;
+        },
         Mode::REST => rest_server().await?,
         Mode::LOOP => block_hash_loop().await?,
         Mode::BOTH => {
@@ -95,7 +108,7 @@ async fn rest_server() -> Result<()> {
         "/add-block-by-number/".to_string(),
         |block_number: String| async move {
             match fetch_block_hash("o3".to_string(), &block_number, None).await {
-                Ok(block_hash) => {
+                Ok((block_hash, _)) => {
                     format!(
                         "{{\"msg\": \"block hash added successfully\", \"block_hash\": \"0x{}\"}}",
                         hex::encode(block_hash.as_bytes())
@@ -133,13 +146,20 @@ async fn block_hash_loop() -> Result<()> {
     let mut last_block_hash: Option<H256> = None;
 
     loop {
-        match fetch_block_hash("avail".to_string(), "", last_block_hash).await {
-            Ok(rpc_response) => {
-                last_block_hash = Some(rpc_response);
+        let fetched_number = read_block_number("avail");
+        let block_number = if fetched_number.is_none() {
+            String::from("")
+        } else {
+            format!("{}", &fetched_number.unwrap())
+        };
+        match fetch_block_hash("avail".to_string(), block_number.as_str(), last_block_hash).await {
+            Ok((block_hash, block_number)) => {
+                write_block_number("avail", block_number + 1)?;
+                last_block_hash = Some(block_hash);
             }
             Err(e) => println!("Failed to fetch block hash {:?}", e),
         }
-        sleep(Duration::from_millis(15000)).await;
+        sleep(Duration::from_millis(13000)).await;
     }
 }
 
@@ -152,20 +172,12 @@ async fn block_hash_from_rpc_loop(
 ) -> Result<()> {
     let zmq_socket_url =
         std::env::var("ZMQ_CHANNEL_URL").unwrap_or_else(|_| "tcp://0.0.0.0:40006".to_string());
-    let mut last_block_number: Option<u128> = _last_block_number.clone();
+    let mut last_block_number: Option<u128> = read_block_number(chain_name);
 
     loop {
-        let context = Arc::new(zmq::Context::new());
-        let sender = context
-            .socket(zmq::REQ)
-            .expect("Failed to create REQ socket");
-    
-        sender
-            .connect(&zmq_socket_url)
-            .expect("Failed to connect to endpoint");
         let last_block_number_hex = match last_block_number {
             None => "latest".to_string(),
-            Some(n) => format!("0x{:x}", n + 1),
+            Some(n) => format!("0x{:x}", n),
         };
         let params = if chain_name == "celestia" {
             vec![
@@ -218,6 +230,14 @@ async fn block_hash_from_rpc_loop(
                                 }
                             }
                         }
+                        let context = Arc::new(zmq::Context::new());
+                        let sender = context
+                            .socket(zmq::REQ)
+                            .expect("Failed to create REQ socket");
+                    
+                        sender
+                            .connect(&zmq_socket_url)
+                            .expect("Failed to connect to endpoint");
                         println!("New block hash of {} at {}: {}", chain_name, last_block_number.unwrap_or_default(), latest_block_hash.unwrap());
     
                         // Prepare and send data via ZMQ
@@ -240,23 +260,27 @@ async fn block_hash_from_rpc_loop(
                         if let Err(e) = sender.send_multipart(&data, 0) {
                             eprintln!("Failed to send data via ZMQ: {}", e);
                         } else {
+                            write_block_number(chain_name, last_block_number.unwrap_or_default())?;
+                            sleep(Duration::from_millis(2000)).await;
                             match sender.recv_string(0) {
-                                Ok(reply) => println!("Received reply: {:?}", reply),
+                                Ok(reply) => {
+                                    println!("Received reply: {:?}", reply);
+                                    drop(sender);
+                                },
                                 Err(e) => eprintln!("Failed to receive reply: {}", e),
                             };
-                            drop(sender);
                             println!("Data sent successfully.");
                         }
                     } else {
                         eprintln!("Failed to fetch block by number: {:?}, {:?}", last_block_number, rpc_response);
                     }
                 } else {
-                    eprintln!("Malformed response: {:?}", rpc_response);
+                    eprintln!("Malformed response of {}: {:?}", chain_name, rpc_response);
                 }
             }
             Err(e) => println!("Failed to fetch block hash {:?}", e),
         }
-        sleep(Duration::from_millis(5000)).await;
+        sleep(Duration::from_millis(3000)).await;
     }
 }
 
@@ -298,18 +322,7 @@ async fn fetch_block_hash(
     identifier: String,
     _block_number: &str,
     last_block_hash: Option<H256>,
-) -> std::result::Result<H256, Box<dyn std::error::Error>> {
-    let zmq_socket_url =
-        std::env::var("ZMQ_CHANNEL_URL").unwrap_or_else(|_| "tcp://0.0.0.0:40006".to_string());
-    let context = Arc::new(zmq::Context::new());
-    let sender = context
-        .socket(zmq::REQ)
-        .expect("Failed to create REQ socket");
-
-    sender
-        .connect(&zmq_socket_url)
-        .expect("Failed to connect to endpoint");
-
+) -> std::result::Result<(H256, u128), Box<dyn std::error::Error>> {
     let avail = SDK::new("wss://mainnet.avail-rpc.com/").await.unwrap();
     let block_number = if !_block_number.is_empty() {
         match _block_number.trim().parse::<u32>() {
@@ -320,7 +333,18 @@ async fn fetch_block_hash(
         None
     };
     let latest_hash = avail.rpc.chain.get_block_hash(block_number).await.unwrap();
+    let latest_block = avail.rpc.chain.get_block(last_block_hash).await.unwrap();
     if last_block_hash != Some(latest_hash) {
+        let zmq_socket_url =
+            std::env::var("ZMQ_CHANNEL_URL").unwrap_or_else(|_| "tcp://0.0.0.0:40006".to_string());
+        let context = Arc::new(zmq::Context::new());
+        let sender = context
+            .socket(zmq::REQ)
+            .expect("Failed to create REQ socket");
+    
+        sender
+            .connect(&zmq_socket_url)
+            .expect("Failed to connect to endpoint");
         println!(
             "block hash for block number {}: {:?}",
             block_number.unwrap_or(0),
@@ -341,16 +365,19 @@ async fn fetch_block_hash(
         if let Err(e) = sender.send_multipart(&data, 0) {
             eprintln!("Failed to send data via ZMQ: {}", e);
         } else {
+            sleep(Duration::from_millis(2000)).await;
             match sender.recv_string(0) {
-                Ok(reply) => println!("Received reply: {:?}", reply),
+                Ok(reply) => {
+                    println!("Received reply: {:?}", reply);
+                    drop(sender);
+                },
                 Err(e) => eprintln!("Failed to receive reply: {}", e),
             };
-            drop(sender);
             println!("Data sent successfully.");
         }
         println!("data sent");
     }
     // let response = sender.recv_msg(0).expect("failed to receive response");
     // println!("Response received: {:?}", response);
-    Ok(latest_hash)
+    Ok((latest_hash, latest_block.block.header.number.into()))
 }

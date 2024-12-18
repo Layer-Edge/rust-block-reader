@@ -22,3 +22,6 @@ Cargo.lock
 
 # Env Files
 .env
+
+# Static or Runtime Folders / Files
+block_numbers
