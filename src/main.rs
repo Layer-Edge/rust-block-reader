@@ -159,7 +159,7 @@ async fn block_hash_loop() -> Result<()> {
             }
             Err(e) => println!("Failed to fetch block hash {:?}", e),
         }
-        sleep(Duration::from_millis(13000)).await;
+        sleep(Duration::from_millis(30000)).await;
     }
 }
 
@@ -260,16 +260,16 @@ async fn block_hash_from_rpc_loop(
                         if let Err(e) = sender.send_multipart(&data, 0) {
                             eprintln!("Failed to send data via ZMQ: {}", e);
                         } else {
+                            println!("Data sent successfully.");
                             write_block_number(chain_name, last_block_number.unwrap_or_default())?;
-                            sleep(Duration::from_millis(2000)).await;
                             match sender.recv_string(0) {
                                 Ok(reply) => {
                                     println!("Received reply: {:?}", reply);
+                                    sleep(Duration::from_millis(5000)).await;
                                     drop(sender);
                                 },
                                 Err(e) => eprintln!("Failed to receive reply: {}", e),
                             };
-                            println!("Data sent successfully.");
                         }
                     } else {
                         eprintln!("Failed to fetch block by number: {:?}, {:?}", last_block_number, rpc_response);
@@ -280,7 +280,7 @@ async fn block_hash_from_rpc_loop(
             }
             Err(e) => println!("Failed to fetch block hash {:?}", e),
         }
-        sleep(Duration::from_millis(3000)).await;
+        sleep(Duration::from_millis(30000)).await;
     }
 }
 
@@ -365,15 +365,15 @@ async fn fetch_block_hash(
         if let Err(e) = sender.send_multipart(&data, 0) {
             eprintln!("Failed to send data via ZMQ: {}", e);
         } else {
-            sleep(Duration::from_millis(2000)).await;
+            println!("Data sent successfully.");
             match sender.recv_string(0) {
                 Ok(reply) => {
                     println!("Received reply: {:?}", reply);
+                    sleep(Duration::from_millis(2000)).await;
                     drop(sender);
                 },
                 Err(e) => eprintln!("Failed to receive reply: {}", e),
             };
-            println!("Data sent successfully.");
         }
         println!("data sent");
     }
