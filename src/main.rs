@@ -240,6 +240,10 @@ async fn block_hash_from_rpc_loop(
                         if let Err(e) = sender.send_multipart(&data, 0) {
                             eprintln!("Failed to send data via ZMQ: {}", e);
                         } else {
+                            match sender.recv_string(0) {
+                                Ok(reply) => println!("Received reply: {:?}", reply),
+                                Err(e) => eprintln!("Failed to receive reply: {}", e),
+                            };
                             drop(sender);
                             println!("Data sent successfully.");
                         }
@@ -337,6 +341,10 @@ async fn fetch_block_hash(
         if let Err(e) = sender.send_multipart(&data, 0) {
             eprintln!("Failed to send data via ZMQ: {}", e);
         } else {
+            match sender.recv_string(0) {
+                Ok(reply) => println!("Received reply: {:?}", reply),
+                Err(e) => eprintln!("Failed to receive reply: {}", e),
+            };
             drop(sender);
             println!("Data sent successfully.");
         }
