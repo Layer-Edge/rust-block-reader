@@ -65,10 +65,5 @@ pub fn write_block_number(file_name: &str, number: u128) -> Result<()> {
         return Err(e);
     }
 
-    println!(
-        "Successfully wrote block number {} to '{}'",
-        number, file_path
-    );
-
     Ok(())
 }

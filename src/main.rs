@@ -1,6 +1,5 @@
 use avail_rust::{hex, H256, SDK};
 use clap::Parser;
-use serde_json::{json, Value};
 use std::{
     fs,
     io::{Error, ErrorKind, Result},
@@ -17,11 +16,13 @@ mod block_number_op;
 mod cli_args;
 mod router;
 mod rpc_call;
+mod util;
 
 use block_number_op::{read_block_number, write_block_number};
 use cli_args::{Args, Mode};
 use router::Router;
 use rpc_call::rpc::rpc_call;
+use util::{get_rpc_call_params, read_rpc_response};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -39,7 +40,7 @@ async fn main() -> Result<()> {
                 number.unwrap() + 1
             };
             write_block_number("celestia", updated_number)?;
-        },
+        }
         Mode::REST => rest_server().await?,
         Mode::LOOP => block_hash_loop().await?,
         Mode::BOTH => {
@@ -51,13 +52,11 @@ async fn main() -> Result<()> {
                     "https://onlylayer.org",
                     "eth_getBlockByNumber",
                     None,
-                    None,
                 ),
                 block_hash_from_rpc_loop(
                     "mintchain",
                     "https://global.rpc.mintchain.io",
                     "eth_getBlockByNumber",
-                    None,
                     None,
                 ),
                 block_hash_from_rpc_loop(
@@ -65,13 +64,11 @@ async fn main() -> Result<()> {
                     "https://mainnet.bitfinity.network",
                     "eth_getBlockByNumber",
                     None,
-                    None,
                 ),
                 block_hash_from_rpc_loop(
                     "u2u",
                     "https://rpc-mainnet.u2u.xyz",
                     "eth_getBlockByNumber",
-                    None,
                     None,
                 ),
                 block_hash_from_rpc_loop(
@@ -79,7 +76,12 @@ async fn main() -> Result<()> {
                     "https://celestia-archival.rpc.grove.city/v1/097ddf85",
                     "header.GetByHeight",
                     None,
-                    Some(3078962),
+                ),
+                block_hash_from_rpc_loop(
+                    "kaanch",
+                    "https://full-testnet-rpc.kaanch.network",
+                    "kaanch_latestblocks",
+                    None,
                 ),
             ) {
                 eprintln!("Error in BOTH mode: {}", e);
@@ -157,7 +159,7 @@ async fn block_hash_loop() -> Result<()> {
                 write_block_number("avail", block_number + 1)?;
                 last_block_hash = Some(block_hash);
             }
-            Err(e) => println!("Failed to fetch block hash {:?}", e),
+            Err(e) => eprintln!("Failed to fetch block hash {:?}", e),
         }
         sleep(Duration::from_millis(30000)).await;
     }
@@ -168,7 +170,6 @@ async fn block_hash_from_rpc_loop(
     rpc_url: &str,
     method: &str,
     auth: Option<&str>,
-    _last_block_number: Option<u128>,
 ) -> Result<()> {
     let zmq_socket_url =
         std::env::var("ZMQ_CHANNEL_URL").unwrap_or_else(|_| "tcp://0.0.0.0:40006".to_string());
@@ -179,47 +180,20 @@ async fn block_hash_from_rpc_loop(
             None => "latest".to_string(),
             Some(n) => format!("0x{:x}", n),
         };
-        let params = if chain_name == "celestia" {
-            vec![
-                json!(last_block_number),
-            ]
-        } else {
-            vec![
-                Value::String(last_block_number_hex),
-                Value::Bool(false)
-            ]
-        };
         match rpc_call(
             rpc_url,
             method,
-            params.clone(),
+            get_rpc_call_params(chain_name, Some(last_block_number_hex), last_block_number),
             auth,
-        ).await {
+        )
+        .await
+        {
             Ok(rpc_response) => {
                 last_block_number = last_block_number.map(|n| n + 1);
-                if let Some((latest_block_hash, latest_block_number)) = rpc_response
-                    .get("result")
-                    .and_then(|result| {
-                        let hash = if chain_name == "celestia" {
-                            result
-                                .get("commit")
-                                .and_then(|commit| commit.get("block_id"))
-                                .and_then(|block_id| block_id.get("hash"))
-                                .and_then(Value::as_str)
-                        } else {
-                            result.get("hash").and_then(Value::as_str)
-                        };
-                        let number = if chain_name == "celestia" {
-                            result
-                                .get("header")
-                                .and_then(|header| header.get("height"))
-                                .and_then(Value::as_str)
-                        } else {
-                            result.get("number").and_then(Value::as_str)
-                        };
-                        Some((hash, number))
-                    })
+                if let Some((latest_block_hash, latest_block_number)) =
+                    read_rpc_response(rpc_response.clone(), chain_name)
                 {
+                    println!("{}", '-'.to_string().repeat(50));
                     if !latest_block_hash.is_none() {
                         if last_block_number.is_none() {
                             if let Some(clean_hex_str) = latest_block_number {
@@ -234,51 +208,55 @@ async fn block_hash_from_rpc_loop(
                         let sender = context
                             .socket(zmq::REQ)
                             .expect("Failed to create REQ socket");
-                    
+
                         sender
                             .connect(&zmq_socket_url)
                             .expect("Failed to connect to endpoint");
-                        println!("New block hash of {} at {}: {}", chain_name, last_block_number.unwrap_or_default(), latest_block_hash.unwrap());
-    
+                        sender.set_rcvtimeo(5000)?;
+                        println!(
+                            "New block hash of {} at {}: {}",
+                            chain_name,
+                            last_block_number.unwrap_or_default(),
+                            latest_block_hash.clone().unwrap()
+                        );
+
                         // Prepare and send data via ZMQ
                         let h256_hash = H256::from_slice(
                             &hex::decode(latest_block_hash.unwrap().trim_start_matches("0x"))
                                 .expect("Invalid hex string"),
                         );
-    
+
                         let data: Vec<Vec<u8>> = vec![
                             b"datablock".to_vec(),
-                            format!(
-                                "{}-chain-{}",
-                                chain_name,
-                                hex::encode(h256_hash.as_bytes())
-                            )
-                            .into_bytes(),
+                            format!("{}-chain-{}", chain_name, hex::encode(h256_hash.as_bytes()))
+                                .into_bytes(),
                             b"!!!!!".to_vec(),
                         ];
-    
+
                         if let Err(e) = sender.send_multipart(&data, 0) {
                             eprintln!("Failed to send data via ZMQ: {}", e);
                         } else {
-                            println!("Data sent successfully.");
                             write_block_number(chain_name, last_block_number.unwrap_or_default())?;
                             match sender.recv_string(0) {
                                 Ok(reply) => {
                                     println!("Received reply: {:?}", reply);
                                     sleep(Duration::from_millis(5000)).await;
                                     drop(sender);
-                                },
+                                }
                                 Err(e) => eprintln!("Failed to receive reply: {}", e),
                             };
                         }
                     } else {
-                        eprintln!("Failed to fetch block by number: {:?}, {:?}", last_block_number, rpc_response);
+                        eprintln!(
+                            "Failed to fetch block by number: {:?}, {:?}",
+                            last_block_number, rpc_response
+                        );
                     }
                 } else {
                     eprintln!("Malformed response of {}: {:?}", chain_name, rpc_response);
                 }
             }
-            Err(e) => println!("Failed to fetch block hash {:?}", e),
+            Err(e) => eprintln!("Failed to fetch block hash {:?}", e),
         }
         sleep(Duration::from_millis(30000)).await;
     }
@@ -341,13 +319,16 @@ async fn fetch_block_hash(
         let sender = context
             .socket(zmq::REQ)
             .expect("Failed to create REQ socket");
-    
+
         sender
             .connect(&zmq_socket_url)
             .expect("Failed to connect to endpoint");
+        sender.set_rcvtimeo(5000)?;
+        println!("{}", '-'.to_string().repeat(50));
         println!(
-            "block hash for block number {}: {:?}",
-            block_number.unwrap_or(0),
+            "New block hash of {} at {}: {:?}",
+            identifier,
+            block_number.unwrap_or_default(),
             latest_hash
         );
 
@@ -365,17 +346,15 @@ async fn fetch_block_hash(
         if let Err(e) = sender.send_multipart(&data, 0) {
             eprintln!("Failed to send data via ZMQ: {}", e);
         } else {
-            println!("Data sent successfully.");
             match sender.recv_string(0) {
                 Ok(reply) => {
                     println!("Received reply: {:?}", reply);
                     sleep(Duration::from_millis(2000)).await;
                     drop(sender);
-                },
+                }
                 Err(e) => eprintln!("Failed to receive reply: {}", e),
             };
         }
-        println!("data sent");
     }
     // let response = sender.recv_msg(0).expect("failed to receive response");
     // println!("Response received: {:?}", response);
