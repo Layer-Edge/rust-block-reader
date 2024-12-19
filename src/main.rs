@@ -236,9 +236,9 @@ async fn block_hash_from_rpc_loop(
                         if let Err(e) = sender.send_multipart(&data, 0) {
                             eprintln!("Failed to send data via ZMQ: {}", e);
                         } else {
-                            write_block_number(chain_name, last_block_number.unwrap_or_default())?;
                             match sender.recv_string(0) {
                                 Ok(reply) => {
+                                    write_block_number(chain_name, last_block_number.unwrap_or_default())?;
                                     println!("Received reply: {:?}", reply);
                                     sleep(Duration::from_millis(5000)).await;
                                     drop(sender);
