@@ -42,47 +42,11 @@ async fn main() -> Result<()> {
             write_block_number("celestia", updated_number)?;
         }
         Mode::REST => rest_server().await?,
-        Mode::LOOP => block_hash_loop().await?,
+        Mode::LOOP => iterate_block_reader().await?,
         Mode::BOTH => {
             if let Err(e) = tokio::try_join!(
                 rest_server(),
-                block_hash_loop(),
-                block_hash_from_rpc_loop(
-                    "onlylayer",
-                    "https://onlylayer.org",
-                    "eth_getBlockByNumber",
-                    None,
-                ),
-                block_hash_from_rpc_loop(
-                    "mintchain",
-                    "https://global.rpc.mintchain.io",
-                    "eth_getBlockByNumber",
-                    None,
-                ),
-                block_hash_from_rpc_loop(
-                    "bitfinity",
-                    "https://mainnet.bitfinity.network",
-                    "eth_getBlockByNumber",
-                    None,
-                ),
-                block_hash_from_rpc_loop(
-                    "u2u",
-                    "https://rpc-mainnet.u2u.xyz",
-                    "eth_getBlockByNumber",
-                    None,
-                ),
-                block_hash_from_rpc_loop(
-                    "celestia",
-                    "https://celestia-archival.rpc.grove.city/v1/097ddf85",
-                    "header.GetByHeight",
-                    None,
-                ),
-                block_hash_from_rpc_loop(
-                    "kaanch",
-                    "https://full-testnet-rpc.kaanch.network",
-                    "kaanch_latestblocks",
-                    None,
-                ),
+                iterate_block_reader(),
             ) {
                 eprintln!("Error in BOTH mode: {}", e);
             }
@@ -92,19 +56,92 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
+async fn iterate_block_reader() -> Result<()> {
+    let mut last_block_hash: Option<H256> = None;
+    let block_fetch_params: Vec<(&str, &str, &str, &str, Option<&str>)> = vec![
+        ("sdk", "avail", "", "", None),
+        (
+            "rpc",
+            "onlylayer",
+            "https://onlylayer.org",
+            "eth_getBlockByNumber",
+            None,
+        ),
+        (
+            "rpc",
+            "mintchain",
+            "https://global.rpc.mintchain.io",
+            "eth_getBlockByNumber",
+            None,
+        ),
+        (
+            "rpc",
+            "bitfinity",
+            "https://mainnet.bitfinity.network",
+            "eth_getBlockByNumber",
+            None,
+        ),
+        (
+            "rpc",
+            "u2u",
+            "https://rpc-mainnet.u2u.xyz",
+            "eth_getBlockByNumber",
+            None,
+        ),
+        (
+            "rpc",
+            "celestia",
+            "https://celestia-archival.rpc.grove.city/v1/097ddf85",
+            "header.GetByHeight",
+            None,
+        ),
+        (
+            "rpc",
+            "kaanch",
+            "https://full-testnet-rpc.kaanch.network",
+            "kaanch_latestblocks",
+            None,
+        ),
+    ];
+
+    loop {
+        for (_type, chain, rpc_url, method, auth) in block_fetch_params.clone() {
+            match _type {
+                "sdk" => {
+                    let fetched_number = read_block_number("avail");
+                    let block_number = if fetched_number.is_none() {
+                        String::from("")
+                    } else {
+                        format!("{}", &fetched_number.unwrap())
+                    };
+                    match fetch_block_hash(
+                        "avail".to_string(),
+                        block_number.as_str(),
+                        last_block_hash,
+                    )
+                    .await
+                    {
+                        Ok((block_hash, block_number)) => {
+                            write_block_number("avail", block_number + 1)?;
+                            last_block_hash = Some(block_hash);
+                        }
+                        Err(e) => eprintln!("Failed to fetch block hash {:?}", e),
+                    }
+                }
+                "rpc" => {
+                    block_hash_from_rpc(chain, rpc_url, method, auth).await?
+                }
+                _ => {
+                    println!("unknown type call");
+                }
+            }
+        }
+        sleep(Duration::from_millis(10000)).await;
+    }
+}
+
 async fn rest_server() -> Result<()> {
     let mut router = Router::new();
-
-    let zmq_socket_url =
-        std::env::var("ZMQ_CHANNEL_URL").unwrap_or_else(|_| "tcp://0.0.0.0:40006".to_string());
-    let context = Arc::new(zmq::Context::new());
-    let sender = context
-        .socket(zmq::REQ)
-        .expect("Failed to create REQ socket");
-
-    sender
-        .connect(&zmq_socket_url)
-        .expect("Failed to connect to endpoint");
 
     router.add_route(
         "/add-block-by-number/".to_string(),
@@ -144,28 +181,7 @@ async fn rest_server() -> Result<()> {
     }
 }
 
-async fn block_hash_loop() -> Result<()> {
-    let mut last_block_hash: Option<H256> = None;
-
-    loop {
-        let fetched_number = read_block_number("avail");
-        let block_number = if fetched_number.is_none() {
-            String::from("")
-        } else {
-            format!("{}", &fetched_number.unwrap())
-        };
-        match fetch_block_hash("avail".to_string(), block_number.as_str(), last_block_hash).await {
-            Ok((block_hash, block_number)) => {
-                write_block_number("avail", block_number + 1)?;
-                last_block_hash = Some(block_hash);
-            }
-            Err(e) => eprintln!("Failed to fetch block hash {:?}", e),
-        }
-        sleep(Duration::from_millis(30000)).await;
-    }
-}
-
-async fn block_hash_from_rpc_loop(
+async fn block_hash_from_rpc(
     chain_name: &str,
     rpc_url: &str,
     method: &str,
@@ -175,91 +191,92 @@ async fn block_hash_from_rpc_loop(
         std::env::var("ZMQ_CHANNEL_URL").unwrap_or_else(|_| "tcp://0.0.0.0:40006".to_string());
     let mut last_block_number: Option<u128> = read_block_number(chain_name);
 
-    loop {
-        let last_block_number_hex = match last_block_number {
-            None => "latest".to_string(),
-            Some(n) => format!("0x{:x}", n),
-        };
-        match rpc_call(
-            rpc_url,
-            method,
-            get_rpc_call_params(chain_name, Some(last_block_number_hex), last_block_number),
-            auth,
-        )
-        .await
-        {
-            Ok(rpc_response) => {
-                last_block_number = last_block_number.map(|n| n + 1);
-                if let Some((latest_block_hash, latest_block_number)) =
-                    read_rpc_response(rpc_response.clone(), chain_name)
-                {
-                    println!("{}", '-'.to_string().repeat(50));
-                    if !latest_block_hash.is_none() {
-                        if last_block_number.is_none() {
-                            if let Some(clean_hex_str) = latest_block_number {
-                                let clean_hex_str = clean_hex_str.trim_start_matches("0x");
-                                match u128::from_str_radix(clean_hex_str, 16) {
-                                    Ok(value) => last_block_number = Some(value),
-                                    Err(e) => eprintln!("Error converting hex to u128: {}", e),
-                                }
+    let last_block_number_hex = match last_block_number {
+        None => "latest".to_string(),
+        Some(n) => format!("0x{:x}", n),
+    };
+    match rpc_call(
+        rpc_url,
+        method,
+        get_rpc_call_params(chain_name, Some(last_block_number_hex), last_block_number),
+        auth,
+    )
+    .await
+    {
+        Ok(rpc_response) => {
+            last_block_number = last_block_number.map(|n| n + 1);
+            if let Some((latest_block_hash, latest_block_number)) =
+                read_rpc_response(rpc_response.clone(), chain_name)
+            {
+                println!("{}", '-'.to_string().repeat(50));
+                if !latest_block_hash.is_none() {
+                    if last_block_number.is_none() {
+                        if let Some(clean_hex_str) = latest_block_number {
+                            let clean_hex_str = clean_hex_str.trim_start_matches("0x");
+                            match u128::from_str_radix(clean_hex_str, 16) {
+                                Ok(value) => last_block_number = Some(value),
+                                Err(e) => eprintln!("Error converting hex to u128: {}", e),
                             }
                         }
-                        let context = Arc::new(zmq::Context::new());
-                        let sender = context
-                            .socket(zmq::REQ)
-                            .expect("Failed to create REQ socket");
+                    }
+                    let context = Arc::new(zmq::Context::new());
+                    let sender = context
+                        .socket(zmq::REQ)
+                        .expect("Failed to create REQ socket");
 
-                        sender
-                            .connect(&zmq_socket_url)
-                            .expect("Failed to connect to endpoint");
-                        sender.set_rcvtimeo(5000)?;
-                        println!(
-                            "New block hash of {} at {}: {}",
-                            chain_name,
-                            last_block_number.unwrap_or_default(),
-                            latest_block_hash.clone().unwrap()
-                        );
+                    sender
+                        .connect(&zmq_socket_url)
+                        .expect("Failed to connect to endpoint");
+                    sender.set_rcvtimeo(5000)?;
+                    println!(
+                        "New block hash of {} at {}: {}",
+                        chain_name,
+                        last_block_number.unwrap_or_default(),
+                        latest_block_hash.clone().unwrap()
+                    );
 
-                        // Prepare and send data via ZMQ
-                        let h256_hash = H256::from_slice(
-                            &hex::decode(latest_block_hash.unwrap().trim_start_matches("0x"))
-                                .expect("Invalid hex string"),
-                        );
+                    // Prepare and send data via ZMQ
+                    let h256_hash = H256::from_slice(
+                        &hex::decode(latest_block_hash.unwrap().trim_start_matches("0x"))
+                            .expect("Invalid hex string"),
+                    );
 
-                        let data: Vec<Vec<u8>> = vec![
-                            b"datablock".to_vec(),
-                            format!("{}-chain-{}", chain_name, hex::encode(h256_hash.as_bytes()))
-                                .into_bytes(),
-                            b"!!!!!".to_vec(),
-                        ];
+                    let data: Vec<Vec<u8>> = vec![
+                        b"datablock".to_vec(),
+                        format!("{}-chain-{}", chain_name, hex::encode(h256_hash.as_bytes()))
+                            .into_bytes(),
+                        b"!!!!!".to_vec(),
+                    ];
 
-                        if let Err(e) = sender.send_multipart(&data, 0) {
-                            eprintln!("Failed to send data via ZMQ: {}", e);
-                        } else {
-                            match sender.recv_string(0) {
-                                Ok(reply) => {
-                                    write_block_number(chain_name, last_block_number.unwrap_or_default())?;
-                                    println!("Received reply: {:?}", reply);
-                                    sleep(Duration::from_millis(5000)).await;
-                                    drop(sender);
-                                }
-                                Err(e) => eprintln!("Failed to receive reply: {}", e),
-                            };
-                        }
+                    if let Err(e) = sender.send_multipart(&data, 0) {
+                        eprintln!("Failed to send data via ZMQ: {}", e);
                     } else {
-                        eprintln!(
-                            "Failed to fetch block by number: {:?}, {:?}",
-                            last_block_number, rpc_response
-                        );
+                        match sender.recv_string(0) {
+                            Ok(reply) => {
+                                write_block_number(
+                                    chain_name,
+                                    last_block_number.unwrap_or_default(),
+                                )?;
+                                println!("Received reply: {:?}", reply);
+                                sleep(Duration::from_millis(5000)).await;
+                                drop(sender);
+                            }
+                            Err(e) => eprintln!("Failed to receive reply: {}", e),
+                        };
                     }
                 } else {
-                    eprintln!("Malformed response of {}: {:?}", chain_name, rpc_response);
+                    eprintln!(
+                        "Failed to fetch block by number: {:?}, {:?}",
+                        last_block_number, rpc_response
+                    );
                 }
+            } else {
+                eprintln!("Malformed response of {}: {:?}", chain_name, rpc_response);
             }
-            Err(e) => eprintln!("Failed to fetch block hash {:?}", e),
         }
-        sleep(Duration::from_millis(30000)).await;
+        Err(e) => eprintln!("Failed to fetch block hash {:?}", e),
     }
+    Ok(())
 }
 
 async fn handle_connection(mut stream: TcpStream, router: Arc<Router>) -> Result<()> {
