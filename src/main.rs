@@ -98,7 +98,7 @@ async fn iterate_block_reader() -> Result<()> {
         (
             "rpc",
             "kaanch",
-            "https://full-testnet-rpc.kaanch.network",
+            "https://rpc.kaanch.network",
             "kaanch_latestblocks",
             None,
         ),
