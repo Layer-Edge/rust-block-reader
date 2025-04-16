@@ -137,8 +137,8 @@ async fn iterate_block_reader(br: Arc<BlockReader>) -> Result<()> {
                     println!("unknown type call");
                 }
             }
+            sleep(Duration::from_millis(1000)).await;
         }
-        sleep(Duration::from_millis(5000)).await;
     }
 }
 

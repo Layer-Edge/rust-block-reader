@@ -95,6 +95,7 @@ impl BlockReader {
                         if let Err(e) = socket.send_multipart(&data, 0) {
                             eprintln!("Failed to send data via ZMQ: {}", e);
                         } else {
+                            sleep(Duration::from_millis(2000)).await;
                             match socket.recv_string(0) {
                                 Ok(reply) => {
                                     write_block_number(
@@ -102,7 +103,6 @@ impl BlockReader {
                                         last_block_number.unwrap_or_default(),
                                     )?;
                                     println!("Received reply: {:?}", reply);
-                                    sleep(Duration::from_millis(5000)).await;
                                 }
                                 Err(e) => eprintln!("Failed to receive reply: {}", e),
                             };
@@ -167,6 +167,8 @@ impl BlockReader {
                     return Ok((latest_hash, latest_block.block.header.number.into()));
                 }
                 
+                // Now we can safely await
+                sleep(Duration::from_millis(2000)).await;
                 match socket.recv_string(0) {
                     Ok(reply) => {
                         println!("Received reply: {:?}", reply);
@@ -174,9 +176,6 @@ impl BlockReader {
                     Err(e) => eprintln!("Failed to receive reply: {}", e),
                 };
             } // MutexGuard is dropped here
-            
-            // Now we can safely await
-            sleep(Duration::from_millis(2000)).await;
         }
         
         Ok((latest_hash, latest_block.block.header.number.into()))
