@@ -90,18 +90,18 @@ impl BlockReader {
                         socket
                             .connect(&self.endpoint)
                             .expect("Failed to connect to endpoint");
-                        let _ = socket.set_rcvtimeo(5 * 60 * 1000);
+                        let _ = socket.set_rcvtimeo(20000);
                         
                         if let Err(e) = socket.send_multipart(&data, 0) {
                             eprintln!("Failed to send data via ZMQ: {}", e);
                         } else {
+                            write_block_number(
+                                chain_name,
+                                last_block_number.unwrap_or_default(),
+                            )?;
                             sleep(Duration::from_millis(2000)).await;
                             match socket.recv_string(0) {
                                 Ok(reply) => {
-                                    write_block_number(
-                                        chain_name,
-                                        last_block_number.unwrap_or_default(),
-                                    )?;
                                     println!("Received reply: {:?}", reply);
                                 }
                                 Err(e) => eprintln!("Failed to receive reply: {}", e),
@@ -171,7 +171,7 @@ impl BlockReader {
             socket
                 .connect(&self.endpoint)
                 .expect("Failed to connect to endpoint");
-            let _ = socket.set_rcvtimeo(5 * 60 * 1000);
+            let _ = socket.set_rcvtimeo(20000);
             
             if let Err(e) = socket.send_multipart(&data, 0) {
                 eprintln!("Failed to send data via ZMQ: {}", e);
