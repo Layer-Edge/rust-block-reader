@@ -1,9 +1,8 @@
 use std::{
-    io::Result, sync::{Arc, Mutex}, time::Duration
+    io::Result, time::Duration
 };
 use avail_rust::{hex, H256, SDK};
 use tokio::time::sleep;
-use zmq::Socket;
 
 use crate::{
     block_number_op::{read_block_number, write_block_number},
@@ -12,25 +11,16 @@ use crate::{
 };
 
 pub struct BlockReader {
-    zmq_socket: Arc<Mutex<Socket>>
+    endpoint: String
 }
 
 impl BlockReader {
     pub fn new() -> Self {
         let zmq_socket_url =
             std::env::var("ZMQ_CHANNEL_URL").unwrap_or_else(|_| "tcp://0.0.0.0:40006".to_string());
-        let context = Arc::new(zmq::Context::new());
-        let sender = context
-            .socket(zmq::REQ)
-            .expect("Failed to create REQ socket");
-
-        sender
-            .connect(&zmq_socket_url)
-            .expect("Failed to connect to endpoint");
-        let _ = sender.set_rcvtimeo(5000);
 
         return BlockReader {
-            zmq_socket: Arc::new(Mutex::new(sender))
+            endpoint: zmq_socket_url,
         }
     }
 
@@ -91,7 +81,17 @@ impl BlockReader {
                             b"!!!!!".to_vec(),
                         ];
     
-                        let socket = self.zmq_socket.lock().unwrap();
+                        // Create a new ZMQ socket for this operation
+                        let context = zmq::Context::new();
+                        let socket = context
+                            .socket(zmq::REQ)
+                            .expect("Failed to create REQ socket");
+                        
+                        socket
+                            .connect(&self.endpoint)
+                            .expect("Failed to connect to endpoint");
+                        let _ = socket.set_rcvtimeo(5 * 60 * 1000);
+                        
                         if let Err(e) = socket.send_multipart(&data, 0) {
                             eprintln!("Failed to send data via ZMQ: {}", e);
                         } else {
@@ -107,6 +107,9 @@ impl BlockReader {
                                 Err(e) => eprintln!("Failed to receive reply: {}", e),
                             };
                         }
+                        
+                        // Close the socket
+                        socket.disconnect(&self.endpoint).expect("Failed to close socket");
                     } else {
                         eprintln!(
                             "Failed to fetch block by number: {:?}, {:?}",
@@ -159,23 +162,32 @@ impl BlockReader {
                 b"!!!!!".to_vec(),
             ];
             
-            // Scope the mutex guard so it's dropped before the await
-            {
-                let socket = self.zmq_socket.lock().unwrap();
-                if let Err(e) = socket.send_multipart(&data, 0) {
-                    eprintln!("Failed to send data via ZMQ: {}", e);
-                    return Ok((latest_hash, latest_block.block.header.number.into()));
+            // Create a new ZMQ socket for this operation
+            let context = zmq::Context::new();
+            let socket = context
+                .socket(zmq::REQ)
+                .expect("Failed to create REQ socket");
+            
+            socket
+                .connect(&self.endpoint)
+                .expect("Failed to connect to endpoint");
+            let _ = socket.set_rcvtimeo(5 * 60 * 1000);
+            
+            if let Err(e) = socket.send_multipart(&data, 0) {
+                eprintln!("Failed to send data via ZMQ: {}", e);
+                return Ok((latest_hash, latest_block.block.header.number.into()));
+            }
+            
+            sleep(Duration::from_millis(2000)).await;
+            match socket.recv_string(0) {
+                Ok(reply) => {
+                    println!("Received reply: {:?}", reply);
                 }
-                
-                // Now we can safely await
-                sleep(Duration::from_millis(2000)).await;
-                match socket.recv_string(0) {
-                    Ok(reply) => {
-                        println!("Received reply: {:?}", reply);
-                    }
-                    Err(e) => eprintln!("Failed to receive reply: {}", e),
-                };
-            } // MutexGuard is dropped here
+                Err(e) => eprintln!("Failed to receive reply: {}", e),
+            };
+            
+            // Close the socket
+            socket.disconnect(&self.endpoint).expect("Failed to close socket");
         }
         
         Ok((latest_hash, latest_block.block.header.number.into()))
