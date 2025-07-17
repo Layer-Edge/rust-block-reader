@@ -139,6 +139,7 @@ async fn iterate_block_reader(br: Arc<BlockReader>) -> Result<()> {
             }
             sleep(Duration::from_millis(1000)).await;
         }
+        sleep(Duration::from_millis(600000)).await;
     }
 }
 
