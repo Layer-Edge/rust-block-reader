@@ -60,11 +60,12 @@ async fn main() -> Result<()> {
 
 async fn iterate_block_reader(br: Arc<BlockReader>) -> Result<()> {
     let mut last_block_hash: Option<H256> = None;
-    let block_fetch_params: Vec<(&str, &str, &str, &str, Option<&str>)> = vec![
-        ("sdk", "avail", "", "", None),
+    let block_fetch_params: Vec<(&str, &str, i32, &str, &str, Option<&str>)> = vec![
+        ("sdk", "avail", 1000, "", "", None), // Avail chain ID - update this to the correct value
         (
             "rpc",
             "onlylayer",
+            123,
             "https://onlylayer.org",
             "eth_getBlockByNumber",
             None,
@@ -72,6 +73,7 @@ async fn iterate_block_reader(br: Arc<BlockReader>) -> Result<()> {
         (
             "rpc",
             "mintchain",
+            456,
             "https://global.rpc.mintchain.io",
             "eth_getBlockByNumber",
             None,
@@ -79,6 +81,7 @@ async fn iterate_block_reader(br: Arc<BlockReader>) -> Result<()> {
         (
             "rpc",
             "bitfinity",
+            789,
             "https://mainnet.bitfinity.network",
             "eth_getBlockByNumber",
             None,
@@ -86,6 +89,7 @@ async fn iterate_block_reader(br: Arc<BlockReader>) -> Result<()> {
         (
             "rpc",
             "u2u",
+            101112,
             "https://rpc-mainnet.u2u.xyz",
             "eth_getBlockByNumber",
             None,
@@ -93,6 +97,7 @@ async fn iterate_block_reader(br: Arc<BlockReader>) -> Result<()> {
         (
             "rpc",
             "celestia",
+            131415,
             "https://celestia-archival.rpc.grove.city/v1/097ddf85",
             "header.GetByHeight",
             None,
@@ -100,6 +105,7 @@ async fn iterate_block_reader(br: Arc<BlockReader>) -> Result<()> {
         (
             "rpc",
             "kaanch",
+            161718,
             "https://rpc.kaanch.network",
             "kaanch_latestblocks",
             None,
@@ -107,7 +113,7 @@ async fn iterate_block_reader(br: Arc<BlockReader>) -> Result<()> {
     ];
 
     loop {
-        for (_type, chain, rpc_url, method, auth) in block_fetch_params.clone() {
+        for (_type, chain, chain_id, rpc_url, method, auth) in block_fetch_params.clone() {
             match _type {
                 "sdk" => {
                     let fetched_number = read_block_number("avail");
@@ -118,6 +124,7 @@ async fn iterate_block_reader(br: Arc<BlockReader>) -> Result<()> {
                     };
                     match br.fetch_block_hash(
                         "avail".to_string(),
+                        chain_id,
                         block_number.as_str(),
                         last_block_hash,
                     )
@@ -131,7 +138,7 @@ async fn iterate_block_reader(br: Arc<BlockReader>) -> Result<()> {
                     }
                 }
                 "rpc" => {
-                    br.block_hash_from_rpc(chain, rpc_url, method, auth).await?
+                    br.block_hash_from_rpc(chain, chain_id, rpc_url, method, auth).await?
                 }
                 _ => {
                     println!("unknown type call");
@@ -151,7 +158,7 @@ async fn rest_server(br: Arc<BlockReader>) -> Result<()> {
         move |block_number: String| {
             let br_clone = br.clone();
             async move {
-                match br_clone.fetch_block_hash("o3".to_string(), &block_number, None).await {
+                match br_clone.fetch_block_hash("o3".to_string(), 2000, &block_number, None).await { // O3 chain ID - update this to the correct value
                     Ok((block_hash, _)) => {
                         format!(
                             "{{\"msg\": \"block hash added successfully\", \"block_hash\": \"0x{}\"}}",

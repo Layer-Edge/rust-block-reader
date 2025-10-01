@@ -3,6 +3,7 @@ use std::{
 };
 use avail_rust::{hex, H256, SDK};
 use tokio::time::sleep;
+use ethabi::{encode, Token};
 
 use crate::{
     block_number_op::{read_block_number, write_block_number},
@@ -24,9 +25,18 @@ impl BlockReader {
         }
     }
 
+    fn abi_encode_proof(chain_id: i32, block_hash: &H256) -> Vec<u8> {
+        let tokens = vec![
+            Token::Uint(chain_id.into()),
+            Token::FixedBytes(block_hash.as_bytes().to_vec()),
+        ];
+        encode(&tokens)
+    }
+
     pub async fn block_hash_from_rpc(
         &self,
         chain_name: &str,
+        chain_id: i32,
         rpc_url: &str,
         method: &str,
         auth: Option<&str>,
@@ -74,10 +84,10 @@ impl BlockReader {
                                 .expect("Invalid hex string"),
                         );
     
+                        let abi_encoded_proof = Self::abi_encode_proof(chain_id, &h256_hash);
                         let data: Vec<Vec<u8>> = vec![
                             b"datablock".to_vec(),
-                            format!("{}-chain-{}", chain_name, hex::encode(h256_hash.as_bytes()))
-                                .into_bytes(),
+                            abi_encoded_proof.to_bytes(),
                             b"!!!!!".to_vec(),
                         ];
     
@@ -128,6 +138,7 @@ impl BlockReader {
     pub async fn fetch_block_hash(
         &self,
         identifier: String,
+        chain_id: i32,
         _block_number: &str,
         last_block_hash: Option<H256>,
     ) -> std::result::Result<(H256, u128), Box<dyn std::error::Error>> {
@@ -151,14 +162,10 @@ impl BlockReader {
                 latest_hash
             );
     
+            let abi_encoded_proof = Self::abi_encode_proof(chain_id, &latest_hash);
             let data: Vec<Vec<u8>> = vec![
                 b"datablock".to_vec(),
-                format!(
-                    "{}-chain-{}",
-                    identifier,
-                    hex::encode(latest_hash.as_bytes())
-                )
-                .into_bytes(),
+                abi_encoded_proof,
                 b"!!!!!".to_vec(),
             ];
             
