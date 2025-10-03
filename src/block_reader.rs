@@ -1,7 +1,7 @@
 use std::{
     io::Result, time::Duration
 };
-use avail_rust::{hex, H256, SDK};
+use avail_rust_client::{ext::const_hex, H256, Client, clients::main_client::ChainApi};
 use tokio::time::sleep;
 use ethabi::{encode, Token};
 
@@ -80,14 +80,17 @@ impl BlockReader {
     
                         // Prepare and send data via ZMQ
                         let h256_hash = H256::from_slice(
-                            &hex::decode(latest_block_hash.unwrap().trim_start_matches("0x"))
+                            &const_hex::decode(latest_block_hash.unwrap().trim_start_matches("0x"))
                                 .expect("Invalid hex string"),
                         );
+
+                        println!("h256_hash: {:?}", h256_hash);
     
                         let abi_encoded_proof = Self::abi_encode_proof(chain_id, &h256_hash);
+                        println!("abi_encoded_proof: {:?}", abi_encoded_proof);
                         let data: Vec<Vec<u8>> = vec![
                             b"datablock".to_vec(),
-                            abi_encoded_proof.to_bytes(),
+                            abi_encoded_proof,
                             b"!!!!!".to_vec(),
                         ];
     
@@ -142,7 +145,8 @@ impl BlockReader {
         _block_number: &str,
         last_block_hash: Option<H256>,
     ) -> std::result::Result<(H256, u128), Box<dyn std::error::Error>> {
-        let avail = SDK::new("wss://mainnet.avail-rpc.com/").await.unwrap();
+        let avail = Client::new("https://mainnet.avail-rpc.com/").await.unwrap();
+        let chain = ChainApi::new(avail);
         let block_number = if !_block_number.is_empty() {
             match _block_number.trim().parse::<u32>() {
                 Ok(num) => Some(num),
@@ -151,9 +155,10 @@ impl BlockReader {
         } else {
             None
         };
-        let latest_hash = avail.rpc.chain.get_block_hash(block_number).await.unwrap();
-        let latest_block = avail.rpc.chain.get_block(last_block_hash).await.unwrap();
-        if last_block_hash != Some(latest_hash) {
+        let latest_hash = chain.block_hash(block_number).await.unwrap();
+        let latest_block = chain.block_header(last_block_hash).await.unwrap();
+
+        if last_block_hash != latest_hash {
             println!("{}", '-'.to_string().repeat(50));
             println!(
                 "New block hash of {} at {}: {:?}",
@@ -161,8 +166,10 @@ impl BlockReader {
                 block_number.unwrap_or_default(),
                 latest_hash
             );
+
     
-            let abi_encoded_proof = Self::abi_encode_proof(chain_id, &latest_hash);
+            let abi_encoded_proof = Self::abi_encode_proof(chain_id, &latest_hash.unwrap());
+            println!("abi_encoded_proof: {:?}", abi_encoded_proof);
             let data: Vec<Vec<u8>> = vec![
                 b"datablock".to_vec(),
                 abi_encoded_proof,
@@ -182,7 +189,7 @@ impl BlockReader {
             
             if let Err(e) = socket.send_multipart(&data, 0) {
                 eprintln!("Failed to send data via ZMQ: {}", e);
-                return Ok((latest_hash, latest_block.block.header.number.into()));
+                return Ok((latest_hash.unwrap(), latest_block.unwrap().number.into()));
             }
             
             sleep(Duration::from_millis(2000)).await;
@@ -197,6 +204,6 @@ impl BlockReader {
             socket.disconnect(&self.endpoint).expect("Failed to close socket");
         }
         
-        Ok((latest_hash, latest_block.block.header.number.into()))
+        Ok((latest_hash.unwrap(), latest_block.unwrap().number.into()))
     }
 }

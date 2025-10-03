@@ -1,4 +1,4 @@
-use avail_rust::{hex, H256};
+use avail_rust_client::{ext::const_hex, H256};
 use clap::Parser;
 use std::{
     fs,
@@ -162,7 +162,7 @@ async fn rest_server(br: Arc<BlockReader>) -> Result<()> {
                     Ok((block_hash, _)) => {
                         format!(
                             "{{\"msg\": \"block hash added successfully\", \"block_hash\": \"0x{}\"}}",
-                            hex::encode(block_hash.as_bytes())
+                            const_hex::encode(block_hash.as_bytes())
                         )
                     }
                     Err(e) => format!(
