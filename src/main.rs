@@ -65,7 +65,7 @@ async fn iterate_block_reader(br: Arc<BlockReader>) -> Result<()> {
         (
             "rpc",
             "onlylayer",
-            123,
+            5820948,
             "https://onlylayer.org",
             "eth_getBlockByNumber",
             None,
@@ -73,7 +73,7 @@ async fn iterate_block_reader(br: Arc<BlockReader>) -> Result<()> {
         (
             "rpc",
             "mintchain",
-            456,
+            185,
             "https://global.rpc.mintchain.io",
             "eth_getBlockByNumber",
             None,
@@ -81,7 +81,7 @@ async fn iterate_block_reader(br: Arc<BlockReader>) -> Result<()> {
         (
             "rpc",
             "bitfinity",
-            789,
+            355110,
             "https://mainnet.bitfinity.network",
             "eth_getBlockByNumber",
             None,
@@ -89,7 +89,7 @@ async fn iterate_block_reader(br: Arc<BlockReader>) -> Result<()> {
         (
             "rpc",
             "u2u",
-            101112,
+            39,
             "https://rpc-mainnet.u2u.xyz",
             "eth_getBlockByNumber",
             None,
