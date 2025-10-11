@@ -4,9 +4,15 @@ use std::{
 use avail_rust_client::{ext::const_hex, H256, Client, clients::main_client::ChainApi};
 use tokio::time::sleep;
 use ethabi::{encode, Token};
+use ethers::{
+    core::types::{Address, BlockNumber, Filter, Log, H256 as EthersH256},
+    providers::{Provider, Http as HttpProvider, Middleware},
+    utils::keccak256,
+};
 
 use crate::{
     block_number_op::{read_block_number, write_block_number},
+    merkle_root_op::{read_last_merkle_root_block, write_last_merkle_root_block, read_last_merkle_root_hash, write_last_merkle_root_hash},
     rpc_call::rpc::rpc_call,
     util::{get_rpc_call_params, read_rpc_response},
 };
@@ -205,5 +211,146 @@ impl BlockReader {
         }
         
         Ok((latest_hash.unwrap(), latest_block.unwrap().number.into()))
+    }
+
+    /// Reads the latest L2MerkleRootAdded event and sends it via ZMQ
+    /// 
+    /// # Arguments
+    /// * `rpc_url` - The RPC URL of the EVM chain
+    /// * `contract_address` - The contract address to monitor for L2MerkleRootAdded events
+    /// * `chain_id` - The chain ID for ABI encoding
+    /// * `chain_name` - The chain name for file tracking
+    /// 
+    /// # Returns
+    /// * `Result<(), Box<dyn std::error::Error>>` - Success or error
+    pub async fn read_latest_l2_merkle_root_event(
+        &self,
+        rpc_url: &str,
+        contract_address: Address,
+        chain_id: i32,
+        chain_name: &str,
+    ) -> std::result::Result<(), Box<dyn std::error::Error>> {
+        // Create ethers provider
+        let provider = Provider::<HttpProvider>::try_from(rpc_url)?;
+
+        // Get the latest block number
+        let latest_block = provider.get_block_number().await?;
+        
+        // Read the last processed block from file
+        let last_processed_block = read_last_merkle_root_block(chain_name);
+        
+        // Determine the starting block for the search
+        let from_block = match last_processed_block {
+            Some(block) => block + 1, // Start from the next block after last processed
+            None => latest_block, // If no previous tracking, start from latest
+        };
+        
+        // Only proceed if there are new blocks to check
+        if from_block > latest_block {
+            println!("No new blocks to check for L2MerkleRootAdded events");
+            return Ok(());
+        }
+        
+        println!("Checking for L2MerkleRootAdded events from block {} to {}", from_block, latest_block);
+        
+        // Create event signature for L2MerkleRootAdded
+        // Assuming the event signature is: L2MerkleRootAdded(bytes32 indexed merkleRoot, uint256 indexed blockNumber)
+        let event_signature = "L2MerkleRootAdded(bytes32,uint256)";
+        let event_topic = EthersH256::from_slice(&keccak256(event_signature.as_bytes()));
+
+        // Create filter for the L2MerkleRootAdded event
+        let filter = Filter::new()
+            .address(contract_address)
+            .topic0(event_topic)
+            .from_block(BlockNumber::Number(from_block))
+            .to_block(BlockNumber::Number(latest_block));
+
+        // Get logs
+        let logs: Vec<Log> = provider.get_logs(&filter).await?;
+
+        if !logs.is_empty() {
+            println!("Found {} L2MerkleRootAdded events", logs.len());
+            
+            // Process all events found
+            for log in &logs {
+                println!("{}", '-'.to_string().repeat(50));
+                println!(
+                    "L2MerkleRootAdded event found at block {}: {:?}",
+                    log.block_number.unwrap_or_default(),
+                    log
+                );
+
+                // Extract merkle root from the first indexed parameter (topic[1])
+                let merkle_root = if log.topics.len() > 1 {
+                    log.topics[1]
+                } else {
+                    eprintln!("No merkle root found in event topics");
+                    continue;
+                };
+
+                println!("Merkle Root: {:?}", merkle_root);
+
+                // Check if this merkle root was already processed
+                let merkle_root_str = format!("{:?}", merkle_root);
+                if let Some(last_hash) = read_last_merkle_root_hash(chain_name) {
+                    if last_hash == merkle_root_str {
+                        println!("Merkle root already processed, skipping");
+                        continue;
+                    }
+                }
+
+                // ABI encode the merkle root with chain ID
+                // Convert ethers H256 to avail H256 for ABI encoding
+                let avail_h256 = H256::from_slice(merkle_root.as_bytes());
+                let abi_encoded_proof = Self::abi_encode_proof(chain_id, &avail_h256);
+                println!("abi_encoded_proof: {:?}", abi_encoded_proof);
+
+                // Prepare data for ZMQ (same format as block_hash_from_rpc)
+                let data: Vec<Vec<u8>> = vec![
+                    b"datablock".to_vec(),
+                    abi_encoded_proof,
+                    b"!!!!!".to_vec(),
+                ];
+
+                // Create a new ZMQ socket for this operation
+                let context = zmq::Context::new();
+                let socket = context
+                    .socket(zmq::REQ)
+                    .expect("Failed to create REQ socket");
+                
+                socket
+                    .connect(&self.endpoint)
+                    .expect("Failed to connect to endpoint");
+                let _ = socket.set_rcvtimeo(20000);
+                
+                if let Err(e) = socket.send_multipart(&data, 0) {
+                    eprintln!("Failed to send L2MerkleRoot data via ZMQ: {}", e);
+                } else {
+                    sleep(Duration::from_millis(2000)).await;
+                    match socket.recv_string(0) {
+                        Ok(reply) => {
+                            println!("Received reply for L2MerkleRoot: {:?}", reply);
+                        }
+                        Err(e) => eprintln!("Failed to receive reply: {}", e),
+                    };
+                }
+                
+                // Close the socket
+                socket.disconnect(&self.endpoint).expect("Failed to close socket");
+                
+                // Update tracking files with the latest processed event
+                if let Some(block_num) = log.block_number {
+                    write_last_merkle_root_block(chain_name, block_num)?;
+                }
+                write_last_merkle_root_hash(chain_name, &merkle_root_str)?;
+            }
+        } else {
+            println!("No new L2MerkleRootAdded events found");
+        }
+        
+        // Update the last processed block even if no events were found
+        write_last_merkle_root_block(chain_name, latest_block)?;
+
+        Ok(())
     }
 }

@@ -1,5 +1,6 @@
 use avail_rust_client::{ext::const_hex, H256};
 use clap::Parser;
+use ethers::core::types::Address;
 use std::{
     fs,
     io::{Error, ErrorKind, Result},
@@ -15,6 +16,7 @@ use tokio::{
 mod block_number_op;
 mod block_reader;
 mod cli_args;
+mod merkle_root_op;
 mod router;
 mod rpc_call;
 mod util;
@@ -35,13 +37,12 @@ async fn main() -> Result<()> {
 
         match args.mode {
         Mode::TEST => {
-            let number = read_block_number("celestia");
-            let updated_number = if number.is_none() {
-                1
-            } else {
-                number.unwrap() + 1
-            };
-            write_block_number("celestia", updated_number)?;
+            br.read_latest_l2_merkle_root_event(
+                "https://0xrpc.io/eth",
+                "0xd19d4B5d358258f05D7B411E21A1460D11B0876F".parse::<Address>().unwrap(),
+                59144,
+                "linea"
+            ).await.map_err(|e| Error::new(ErrorKind::Other, e.to_string()))?;
         }
         Mode::REST => rest_server(br.clone()).await?,
         Mode::LOOP => iterate_block_reader(br.clone()).await?,
@@ -60,14 +61,23 @@ async fn main() -> Result<()> {
 
 async fn iterate_block_reader(br: Arc<BlockReader>) -> Result<()> {
     let mut last_block_hash: Option<H256> = None;
-    let block_fetch_params: Vec<(&str, &str, i32, &str, &str, Option<&str>)> = vec![
-        ("sdk", "avail", 1000, "", "", None), // Avail chain ID - update this to the correct value
+    let block_fetch_params: Vec<(&str, &str, i32, &str, &str, &str, Option<&str>)> = vec![
+        (
+            "sdk",
+            "avail",
+            1000,
+            "",
+            "",
+            "",
+            None,
+        ), // Avail chain ID - update this to the correct value
         (
             "rpc",
             "onlylayer",
             5820948,
             "https://onlylayer.org",
             "eth_getBlockByNumber",
+            "",
             None,
         ),
         (
@@ -76,6 +86,7 @@ async fn iterate_block_reader(br: Arc<BlockReader>) -> Result<()> {
             185,
             "https://global.rpc.mintchain.io",
             "eth_getBlockByNumber",
+            "",
             None,
         ),
         (
@@ -84,6 +95,7 @@ async fn iterate_block_reader(br: Arc<BlockReader>) -> Result<()> {
             355110,
             "https://mainnet.bitfinity.network",
             "eth_getBlockByNumber",
+            "",
             None,
         ),
         (
@@ -92,6 +104,7 @@ async fn iterate_block_reader(br: Arc<BlockReader>) -> Result<()> {
             39,
             "https://rpc-mainnet.u2u.xyz",
             "eth_getBlockByNumber",
+            "",
             None,
         ),
         (
@@ -100,6 +113,7 @@ async fn iterate_block_reader(br: Arc<BlockReader>) -> Result<()> {
             131415,
             "https://celestia-archival.rpc.grove.city/v1/097ddf85",
             "header.GetByHeight",
+            "",
             None,
         ),
         (
@@ -108,12 +122,22 @@ async fn iterate_block_reader(br: Arc<BlockReader>) -> Result<()> {
             161718,
             "https://rpc.kaanch.network",
             "kaanch_latestblocks",
+            "",
+            None,
+        ),
+        (
+            "contract",
+            "linea",
+            59144,
+            "https://0xrpc.io/eth",
+            "L2MerkleRootAdded",
+            "0xd19d4B5d358258f05D7B411E21A1460D11B0876F",
             None,
         ),
     ];
 
     loop {
-        for (_type, chain, chain_id, rpc_url, method, auth) in block_fetch_params.clone() {
+        for (_type, chain, chain_id, rpc_url, method, contract_address, auth) in block_fetch_params.clone() {
             match _type {
                 "sdk" => {
                     let fetched_number = read_block_number("avail");
@@ -140,6 +164,14 @@ async fn iterate_block_reader(br: Arc<BlockReader>) -> Result<()> {
                 "rpc" => {
                     br.block_hash_from_rpc(chain, chain_id, rpc_url, method, auth).await?
                 }
+                 "contract" => {
+                     br.read_latest_l2_merkle_root_event(
+                         rpc_url,
+                         contract_address.parse::<Address>().unwrap(),
+                         chain_id,
+                         chain,
+                     ).await.map_err(|e| Error::new(ErrorKind::Other, e.to_string()))?
+                 }
                 _ => {
                     println!("unknown type call");
                 }
