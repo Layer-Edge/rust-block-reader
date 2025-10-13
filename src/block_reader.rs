@@ -343,6 +343,7 @@ impl BlockReader {
                     write_last_merkle_root_block(chain_name, block_num)?;
                 }
                 write_last_merkle_root_hash(chain_name, &merkle_root_str)?;
+                break;
             }
         } else {
             println!("No new L2MerkleRootAdded events found");
