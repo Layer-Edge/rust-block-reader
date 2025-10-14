@@ -135,6 +135,3 @@ mod util;
 ### Troubleshooting
 - If build fails with ZeroMQ-related errors, install the ZeroMQ system library (see Prerequisites)
 - Network errors often indicate an invalid RPC URL or chain ID; verify and update the hardcoded values in `main.rs`
-
-### License
-Specify your project license here (e.g., MIT or Apache-2.0).
