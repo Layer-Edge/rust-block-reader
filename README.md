@@ -1,6 +1,6 @@
 ## Rust Block Reader
 
-A lightweight Rust service for ingesting zk proofs and related on-chain signals (block hashes, headers, merkle roots, events) from multiple protocols, and preparing them for integration into LayerEdge's Aggregation & Verification Layer. It exposes functionality via:
+A lightweight Rust service for ingesting zk proofs and related on-chain signals (block hashes, headers, merkle roots, events) from multiple protocols, and preparing them for integeration into LayerEdge's Aggregation & Verification Layer. It exposes functionality via:
 
 - CLI modes: test, REST API server, background loop, or both
 - Minimal HTTP endpoint to enqueue a block number and fetch its hash
