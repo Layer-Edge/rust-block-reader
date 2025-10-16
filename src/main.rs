@@ -91,15 +91,6 @@ async fn iterate_block_reader(br: Arc<BlockReader>) -> Result<()> {
         ),
         (
             "rpc",
-            "bitfinity",
-            355110,
-            "https://mainnet.bitfinity.network",
-            "eth_getBlockByNumber",
-            "",
-            None,
-        ),
-        (
-            "rpc",
             "u2u",
             39,
             "https://rpc-mainnet.u2u.xyz",
