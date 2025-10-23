@@ -129,7 +129,7 @@ async fn iterate_block_reader(br: Arc<BlockReader>) -> Result<()> {
             "rpc",
             "tron",
             728126428,
-            "https://tron.drpc.org",
+            "https://tron-evm-rpc.publicnode.com",
             "eth_getBlockByNumber",
             "",
             None,
