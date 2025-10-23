@@ -125,6 +125,15 @@ async fn iterate_block_reader(br: Arc<BlockReader>) -> Result<()> {
             "0xd19d4B5d358258f05D7B411E21A1460D11B0876F",
             None,
         ),
+        (
+            "rpc",
+            "tron",
+            728126428,
+            "https://tron.drpc.org",
+            "eth_getBlockByNumber",
+            "",
+            None,
+        ),
     ];
 
     loop {
