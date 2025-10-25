@@ -3,10 +3,9 @@ use serde_json::{json, Value};
 pub fn get_rpc_call_params(
     chain_name: &str,
     block_number_hex: Option<String>,
-    block_number: Option<u128>,
 ) -> Vec<Value> {
     match chain_name {
-        "celestia" => vec![json!(block_number)],
+        "celestia" => vec![],
         "kaanch" => vec![json!(1)],
         _ => vec![
             Value::String(block_number_hex.unwrap_or_default()),

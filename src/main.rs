@@ -61,6 +61,10 @@ async fn main() -> Result<()> {
 
 async fn iterate_block_reader(br: Arc<BlockReader>) -> Result<()> {
     let mut last_block_hash: Option<H256> = None;
+    let celestia_rpc_auth =
+            std::env::var("CELESTIA_RPC_AUTH").unwrap_or_else(|_| "".to_string());
+    let celestia_auth_string = format!("Bearer {}", celestia_rpc_auth);
+    let celestia_rpc_auth_param = Some(celestia_auth_string.as_str());
     let block_fetch_params: Vec<(&str, &str, i32, &str, &str, &str, Option<&str>)> = vec![
         (
             "sdk",
@@ -102,10 +106,10 @@ async fn iterate_block_reader(br: Arc<BlockReader>) -> Result<()> {
             "rpc",
             "celestia",
             131415,
-            "https://celestia-archival.rpc.grove.city/v1/097ddf85",
-            "header.GetByHeight",
+            "http://10.20.1.40:26658",
+            "header.NetworkHead",
             "",
-            None,
+            celestia_rpc_auth_param,
         ),
         (
             "rpc",
@@ -130,6 +134,15 @@ async fn iterate_block_reader(br: Arc<BlockReader>) -> Result<()> {
             "tron",
             728126428,
             "https://tron-evm-rpc.publicnode.com",
+            "eth_getBlockByNumber",
+            "",
+            None,
+        ),
+        (
+            "rpc",
+            "bsc",
+            56,
+            "https://bsc-rpc.publicnode.com",
             "eth_getBlockByNumber",
             "",
             None,

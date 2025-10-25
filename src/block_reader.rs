@@ -49,14 +49,11 @@ impl BlockReader {
     ) -> Result<()> {
         let mut last_block_number: Option<u128> = read_block_number(chain_name);
     
-        let last_block_number_hex = match last_block_number {
-            None => "latest".to_string(),
-            Some(n) => format!("0x{:x}", n),
-        };
+        let last_block_number_hex = "latest".to_string();
         match rpc_call(
             rpc_url,
             method,
-            get_rpc_call_params(chain_name, Some(last_block_number_hex), last_block_number),
+            get_rpc_call_params(chain_name, Some(last_block_number_hex)),
             auth,
         )
         .await
