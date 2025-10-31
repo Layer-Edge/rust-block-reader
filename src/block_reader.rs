@@ -351,4 +351,163 @@ impl BlockReader {
 
         Ok(())
     }
+    
+    /// Reads the latest VerifyBatchesTrustedAggregator event and sends it via ZMQ
+    /// 
+    /// # Arguments
+    /// * `rpc_url` - The RPC URL of the EVM chain
+    /// * `contract_address` - The contract address to monitor for VerifyBatchesTrustedAggregator events
+    /// * `chain_id` - The chain ID for ABI encoding
+    /// * `chain_name` - The chain name for file tracking
+    /// 
+    /// # Returns
+    /// * `Result<(), Box<dyn std::error::Error>>` - Success or error
+    pub async fn read_latest_verify_batches_trusted_aggregator_event(
+        &self,
+        rpc_url: &str,
+        contract_address: Address,
+        chain_id: i32,
+        chain_name: &str,
+    ) -> std::result::Result<(), Box<dyn std::error::Error>> {
+        // Create ethers provider
+        let provider = Provider::<HttpProvider>::try_from(rpc_url)?;
+
+        // Get the latest block number
+        let latest_block = provider.get_block_number().await?;
+        
+        // Read the last processed block from file
+        let last_processed_block = read_last_merkle_root_block(chain_name);
+        
+        // Determine the starting block for the search
+        let from_block = match last_processed_block {
+            Some(block) => block + 1, // Start from the next block after last processed
+            None => latest_block, // If no previous tracking, start from latest
+        };
+        
+        // Only proceed if there are new blocks to check
+        if from_block > latest_block {
+            println!("No new blocks to check for VerifyBatchesTrustedAggregator events");
+            return Ok(());
+        }
+        
+        println!("Checking for VerifyBatchesTrustedAggregator events from block {} to {}", from_block, latest_block);
+        
+        // Create event signature for VerifyBatchesTrustedAggregator
+        // Assuming the event signature is: VerifyBatchesTrustedAggregator (index_topic_1 uint32 rollupID, uint64 numBatch, bytes32 stateRoot, bytes32 exitRoot, index_topic_2 address aggregator)
+        let event_signature = "VerifyBatchesTrustedAggregator(uint32,uint64,bytes32,bytes32,address)";
+        let event_topic = EthersH256::from_slice(&keccak256(event_signature.as_bytes()));
+
+        // Create filter for the VerifyBatchesTrustedAggregator event
+        let filter = Filter::new()
+            .address(contract_address)
+            .topic0(event_topic)
+            .from_block(BlockNumber::Number(from_block))
+            .to_block(BlockNumber::Number(latest_block));
+
+        // Get logs
+        let logs: Vec<Log> = provider.get_logs(&filter).await?;
+
+        if !logs.is_empty() {
+            println!("Found {} VerifyBatchesTrustedAggregator events", logs.len());
+            
+            // Process all events found
+            for log in &logs {
+                println!("{}", '-'.to_string().repeat(50));
+                println!(
+                    "VerifyBatchesTrustedAggregator event found at block {}: {:?}",
+                    log.block_number.unwrap_or_default(),
+                    log
+                );
+
+                // Extract state root from the event data
+                // Event signature: VerifyBatchesTrustedAggregator(uint32 rollupID, uint64 numBatch, bytes32 stateRoot, bytes32 exitRoot, address aggregator)
+                // stateRoot is the 3rd parameter (not indexed), so it's in the data field
+                let merkle_root = if log.data.len() >= 64 { // Need at least 64 bytes for stateRoot (32 bytes) + exitRoot (32 bytes)
+                    // Skip rollupID (32 bytes) and numBatch (32 bytes), then take stateRoot (32 bytes)
+                    let state_root_start = 32; // Skip first 64 bytes (rollupID + numBatch)
+                    let state_root_end = state_root_start + 32; // stateRoot is 32 bytes
+                    
+                    if state_root_end <= log.data.len() {
+                        EthersH256::from_slice(&log.data[state_root_start..state_root_end])
+                    } else {
+                        eprintln!("Insufficient data length for state root extraction");
+                        continue;
+                    }
+                } else {
+                    eprintln!("No state root found in event data");
+                    continue;
+                };
+
+                // Skip if state root is all zeros
+                if merkle_root == EthersH256::zero() {
+                    println!("State root is all zeros (0x0000...00), skipping");
+                    continue;
+                }
+
+                println!("Merkle Root: {:?}", merkle_root);
+
+                // Check if this merkle root was already processed
+                let merkle_root_str = format!("{:?}", merkle_root);
+                if let Some(last_hash) = read_last_merkle_root_hash(chain_name) {
+                    if last_hash == merkle_root_str {
+                        println!("Merkle root already processed, skipping");
+                        continue;
+                    }
+                }
+
+                // ABI encode the merkle root with chain ID
+                // Convert ethers H256 to avail H256 for ABI encoding
+                let avail_h256 = H256::from_slice(merkle_root.as_bytes());
+                let abi_encoded_proof = Self::abi_encode_proof(chain_id, &avail_h256);
+                println!("abi_encoded_proof: {:?}", abi_encoded_proof);
+
+                // Prepare data for ZMQ (same format as block_hash_from_rpc)
+                let data: Vec<Vec<u8>> = vec![
+                    b"datablock".to_vec(),
+                    abi_encoded_proof,
+                    b"!!!!!".to_vec(),
+                ];
+
+                // Create a new ZMQ socket for this operation
+                let context = zmq::Context::new();
+                let socket = context
+                    .socket(zmq::REQ)
+                    .expect("Failed to create REQ socket");
+                
+                socket
+                    .connect(&self.endpoint)
+                    .expect("Failed to connect to endpoint");
+                let _ = socket.set_rcvtimeo(20000);
+                
+                if let Err(e) = socket.send_multipart(&data, 0) {
+                    eprintln!("Failed to send VerifyBatchesTrustedAggregator data via ZMQ: {}", e);
+                } else {
+                    sleep(Duration::from_millis(2000)).await;
+                    match socket.recv_string(0) {
+                        Ok(reply) => {
+                            println!("Received reply for VerifyBatchesTrustedAggregator: {:?}", reply);
+                        }
+                        Err(e) => eprintln!("Failed to receive reply: {}", e),
+                    };
+                }
+                
+                // Close the socket
+                socket.disconnect(&self.endpoint).expect("Failed to close socket");
+                
+                // Update tracking files with the latest processed event
+                if let Some(block_num) = log.block_number {
+                    write_last_merkle_root_block(chain_name, block_num)?;
+                }
+                write_last_merkle_root_hash(chain_name, &merkle_root_str)?;
+                break;
+            }
+        } else {
+            println!("No new VerifyBatchesTrustedAggregator events found");
+        }
+        
+        // Update the last processed block even if no events were found
+        write_last_merkle_root_block(chain_name, latest_block)?;
+
+        Ok(())
+    }
 }

@@ -5,7 +5,7 @@ use std::{
     fs,
     io::{Error, ErrorKind, Result},
     sync::Arc,
-    time::Duration,
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -60,12 +60,15 @@ async fn main() -> Result<()> {
 }
 
 async fn iterate_block_reader(br: Arc<BlockReader>) -> Result<()> {
+    let proof_collection_interval =
+            std::env::var("PROOF_COLLECTION_INTERVAL").unwrap_or_else(|_| "600".to_string()).parse::<u64>().unwrap();
     let mut last_block_hash: Option<H256> = None;
     let celestia_rpc_auth =
             std::env::var("CELESTIA_RPC_AUTH").unwrap_or_else(|_| "".to_string());
     let celestia_auth_string = format!("Bearer {}", celestia_rpc_auth);
     let celestia_rpc_auth_param = Some(celestia_auth_string.as_str());
-    let block_fetch_params: Vec<(&str, &str, i32, &str, &str, &str, Option<&str>)> = vec![
+    let celestia_rpc_url = std::env::var("CELESTIA_RPC_URL").unwrap_or_else(|_| "http://localhost:26658".to_string());
+    let block_fetch_params: Vec<(&str, &str, i32, &str, &str, &str, Option<&str>, Option<&str>)> = vec![
         (
             "sdk",
             "avail",
@@ -73,6 +76,7 @@ async fn iterate_block_reader(br: Arc<BlockReader>) -> Result<()> {
             "",
             "",
             "",
+            None,
             None,
         ), // Avail chain ID - update this to the correct value
         (
@@ -83,6 +87,7 @@ async fn iterate_block_reader(br: Arc<BlockReader>) -> Result<()> {
             "eth_getBlockByNumber",
             "",
             None,
+            None,
         ),
         (
             "rpc",
@@ -91,6 +96,7 @@ async fn iterate_block_reader(br: Arc<BlockReader>) -> Result<()> {
             "https://global.rpc.mintchain.io",
             "eth_getBlockByNumber",
             "",
+            None,
             None,
         ),
         (
@@ -101,15 +107,17 @@ async fn iterate_block_reader(br: Arc<BlockReader>) -> Result<()> {
             "eth_getBlockByNumber",
             "",
             None,
+            None,
         ),
         (
             "rpc",
             "celestia",
             131415,
-            "http://10.20.1.40:26658",
+            &celestia_rpc_url.as_str(),
             "header.NetworkHead",
             "",
             celestia_rpc_auth_param,
+            None,
         ),
         (
             "rpc",
@@ -118,6 +126,7 @@ async fn iterate_block_reader(br: Arc<BlockReader>) -> Result<()> {
             "https://rpc.kaanch.network",
             "kaanch_latestblocks",
             "",
+            None,
             None,
         ),
         (
@@ -128,6 +137,7 @@ async fn iterate_block_reader(br: Arc<BlockReader>) -> Result<()> {
             "L2MerkleRootAdded",
             "0xd19d4B5d358258f05D7B411E21A1460D11B0876F",
             None,
+            Some("read_latest_l2_merkle_root_event"),
         ),
         (
             "rpc",
@@ -136,6 +146,7 @@ async fn iterate_block_reader(br: Arc<BlockReader>) -> Result<()> {
             "https://tron-evm-rpc.publicnode.com",
             "eth_getBlockByNumber",
             "",
+            None,
             None,
         ),
         (
@@ -146,11 +157,39 @@ async fn iterate_block_reader(br: Arc<BlockReader>) -> Result<()> {
             "eth_getBlockByNumber",
             "",
             None,
+            None,
         ),
+        // (
+        //     "contract",
+        //     "polygon_zkevm",
+        //     1101,
+        //     "https://0xrpc.io/eth",
+        //     "VerifyBatchesTrustedAggregator",
+        //     "0x5132A183E9F3CB7C848b0AAC5Ae0c4f0491B7aB2",
+        //     None,
+        //     Some("read_latest_verify_batches_trusted_aggregator_event"),
+        // ),
     ];
 
     loop {
-        for (_type, chain, chain_id, rpc_url, method, contract_address, auth) in block_fetch_params.clone() {
+        // Calculate the next 10-minute interval (e.g., if it's 12:03, next is 12:10)
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
+        let total_seconds = now.as_secs();
+        let total_minutes = total_seconds / 60;
+        
+        // Round up to the next interval (converting seconds to minutes)
+        let interval_minutes = proof_collection_interval / 60;
+        let next_interval = ((total_minutes / interval_minutes) + 1) * interval_minutes;
+        let next_target_seconds = next_interval * 60;
+        let sleep_seconds = next_target_seconds.saturating_sub(total_seconds);
+        
+        // Sleep until the next 10-minute interval
+        if sleep_seconds > 0 {
+            sleep(Duration::from_secs(sleep_seconds)).await;
+        }
+        
+        // Execute all tasks
+        for (_type, chain, chain_id, rpc_url, method, contract_address, auth, event_function) in block_fetch_params.clone() {
             match _type {
                 "sdk" => {
                     let fetched_number = read_block_number("avail");
@@ -178,12 +217,29 @@ async fn iterate_block_reader(br: Arc<BlockReader>) -> Result<()> {
                     br.block_hash_from_rpc(chain, chain_id, rpc_url, method, auth).await?
                 }
                  "contract" => {
-                     br.read_latest_l2_merkle_root_event(
-                         rpc_url,
-                         contract_address.parse::<Address>().unwrap(),
-                         chain_id,
-                         chain,
-                     ).await.map_err(|e| Error::new(ErrorKind::Other, e.to_string()))?
+                     if let Some(func_name) = event_function {
+                        match func_name {
+                            "read_latest_l2_merkle_root_event" => {
+                                br.read_latest_l2_merkle_root_event(
+                                    rpc_url,
+                                    contract_address.parse::<Address>().unwrap(),
+                                    chain_id,
+                                    chain,
+                                ).await.map_err(|e| Error::new(ErrorKind::Other, e.to_string()))?
+                            }
+                            "read_latest_verify_batches_trusted_aggregator_event" => {
+                                br.read_latest_verify_batches_trusted_aggregator_event(
+                                    rpc_url,
+                                    contract_address.parse::<Address>().unwrap(),
+                                    chain_id,
+                                    chain,
+                                ).await.map_err(|e| Error::new(ErrorKind::Other, e.to_string()))?
+                            }
+                            _ => println!("unknown event function: {}", func_name),
+                        }
+                     } else {
+                        println!("unknown event function");
+                    }
                  }
                 _ => {
                     println!("unknown type call");
@@ -191,7 +247,6 @@ async fn iterate_block_reader(br: Arc<BlockReader>) -> Result<()> {
             }
             sleep(Duration::from_millis(1000)).await;
         }
-        sleep(Duration::from_millis(600000)).await;
     }
 }
 
