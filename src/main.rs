@@ -68,6 +68,9 @@ async fn iterate_block_reader(br: Arc<BlockReader>) -> Result<()> {
     let celestia_auth_string = format!("Bearer {}", celestia_rpc_auth);
     let celestia_rpc_auth_param = Some(celestia_auth_string.as_str());
     let celestia_rpc_url = std::env::var("CELESTIA_RPC_URL").unwrap_or_else(|_| "http://localhost:26658".to_string());
+    let eth_rpc_url = std::env::var("ETH_RPC_URL").unwrap_or_else(|_| "https://0xrpc.io/eth".to_string());
+    let bsc_rpc_url = std::env::var("BSC_RPC_URL").unwrap_or_else(|_| "https://bsc-rpc.publicnode.com".to_string());
+    let arbi_rpc_url = std::env::var("ARBI_RPC_URL").unwrap_or_else(|_| "https://arb1.arbitrum.io/rpc".to_string());
     let block_fetch_params: Vec<(&str, &str, i32, &str, &str, &str, Option<&str>, Option<&str>)> = vec![
         (
             "sdk",
@@ -133,7 +136,7 @@ async fn iterate_block_reader(br: Arc<BlockReader>) -> Result<()> {
             "contract",
             "linea",
             59144,
-            "https://0xrpc.io/eth",
+            &eth_rpc_url.as_str(),
             "L2MerkleRootAdded",
             "0xd19d4B5d358258f05D7B411E21A1460D11B0876F",
             None,
@@ -153,22 +156,32 @@ async fn iterate_block_reader(br: Arc<BlockReader>) -> Result<()> {
             "rpc",
             "bsc",
             56,
-            "https://bsc-rpc.publicnode.com",
+            &bsc_rpc_url.as_str(),
             "eth_getBlockByNumber",
             "",
             None,
             None,
         ),
-        // (
-        //     "contract",
-        //     "polygon_zkevm",
-        //     1101,
-        //     "https://0xrpc.io/eth",
-        //     "VerifyBatchesTrustedAggregator",
-        //     "0x5132A183E9F3CB7C848b0AAC5Ae0c4f0491B7aB2",
-        //     None,
-        //     Some("read_latest_verify_batches_trusted_aggregator_event"),
-        // ),
+        (
+            "contract",
+            "polygon_zkevm",
+            1101,
+            &eth_rpc_url.as_str(),
+            "VerifyBatchesTrustedAggregator",
+            "0x5132A183E9F3CB7C848b0AAC5Ae0c4f0491B7aB2",
+            None,
+            Some("read_latest_verify_batches_trusted_aggregator_event"),
+        ),
+        (
+            "rpc",
+            "arbitrum",
+            42161,
+            &arbi_rpc_url.as_str(),
+            "eth_getBlockByNumber",
+            "",
+            None,
+            None,
+        ),
     ];
 
     loop {
