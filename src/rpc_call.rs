@@ -18,10 +18,15 @@ pub mod rpc {
             "id": 1
         });
 
-        let response = client
+        let mut request = client
             .post(rpc_url)
-            .header("Content-Type", "application/json")
-            .header("Authorization", auth.unwrap_or_default())
+            .header("Content-Type", "application/json");
+        
+        if let Some(auth_value) = auth {
+            request = request.header("Authorization", auth_value);
+        }
+        
+        let response = request
             .json(&request_body)
             .send()
             .await?;
